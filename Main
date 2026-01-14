@@ -1,0 +1,63 @@
+extends Node2D
+
+@export var dificultad_global: float = 3.0
+@export var incremento_dificultad: float = 0.4
+@onready var spawners = $Spawners.get_children()
+@onready var camino = $Camino
+var player_s = preload("res://Escenas/player.tscn")
+var player = null
+var puntos = 0
+var vidas = 3
+var dificultad_max = 20.0
+var dificultad_min = 1.0
+
+
+func _ready():
+	$SpawnTimer.start()
+	spawn_player()
+	player.position = Vector2(90.0, 250.0)
+
+func _on_spawn_timer_timeout():
+	for marker in spawners:
+		if marker.has_method("intentar_spawn"):
+			marker.intentar_spawn(dificultad_global)
+
+func _on_dificult_timer_timeout() -> void:
+	dificultad_global += incremento_dificultad
+	dificultad_global = min(dificultad_global, dificultad_max)
+	print("Dificultad subió a: ", dificultad_global)
+	camino.autoscroll.y = 30 * dificultad_global 
+	if $SpawnTimer.wait_time > 0.5:
+		$SpawnTimer.wait_time -= 0.05
+
+func spawn_player():
+	var instanciar = player_s.instantiate()
+	add_child(instanciar)
+	player = instanciar
+
+func sumar_puntos(amount: int):
+	puntos += amount
+	print("puntos: " + str(puntos))
+
+func choques():
+	vidas -= 1
+	if vidas <= 0:
+		player.perder()
+	else:
+		bajar_dificultad()
+
+func bajar_dificultad():
+	dificultad_global = dificultad_global / 2.0
+	dificultad_global = max(dificultad_min, dificultad_global)
+	
+	if camino:
+		camino.autoscroll.y = 30 * dificultad_global
+	if player:
+		player.modulate = Color(1, 0, 0)
+		await get_tree().create_timer(0.2).timeout
+		if player:
+			player.modulate = Color(1, 1, 1)
+
+func game_over():
+	if player:
+		player.perder()
