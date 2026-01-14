@@ -1,0 +1,74 @@
+extends CharacterBody2D
+
+#Variables Normales
+var velo = 200.0
+var saltando = false
+var gravedad = 980.0
+var buffer_tiempo_maximo = 0.18
+var buffer_contador = 0.0 
+
+#Intento QTE
+var haciendo_qte = false
+var secuencia_qte = [] #["arriba", "izquierda", "abajo"]
+var paso_actual_qte = 0
+var trucos_sprites = []
+
+@onready var ui_qte_layer = $CanvasLayer
+@onready var contenedor_flechas = $CanvasLayer/QTEcontainer
+@onready var sprite_player = $Sprite2D
+var tex_flecha_arriba = preload("res://Sprites/FUp.png")
+var tex_flecha_abajo = preload("res://Sprites/Fdown.png")
+var tex_flecha_izq = preload("res://Sprites/Fleft.png")
+var tex_flecha_der = preload("res://Sprites/Fright.png")
+
+var tex_pose_1 = preload("res://Sprites/Pinguinotruco1.png")
+var tex_pose_2 = preload("res://Sprites/pinguinotruco2.png")
+
+func _ready() -> void:
+	trucos_sprites = [tex_pose_1, tex_pose_2]
+	ui_qte_layer.visible = false
+
+func _physics_process(delta):
+	if haciendo_qte:
+		velocity = Vector2.ZERO # Se queda congelado en el aire
+		move_and_slide()
+		return
+		
+	var tilt_amount = 15.0
+	var direction = Input.get_axis("left", "right")
+	$Sprite2D.rotation_degrees = lerp($Sprite2D.rotation_degrees, direction * tilt_amount, 0.1)
+	
+	if direction:
+		velocity.x = direction * velo 
+	else:
+		velocity.x = move_toward(velocity.x, 0, velo)
+	
+	move_and_slide()
+	position.x = clamp(position.x, 20, 160)
+	if Input.is_action_just_pressed("jump"):
+		buffer_contador = buffer_tiempo_maximo
+
+	if buffer_contador > 0:
+		buffer_contador -= delta
+
+	if buffer_contador > 0 and not saltando:
+		salto()
+		buffer_contador = 0.0
+
+func salto():
+	if saltando:
+		return
+	
+	saltando = true
+	var suelo = position.y 
+	var tween = create_tween()
+	
+	tween.tween_property(self, "position:y", suelo - 70, 0.4).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(self, "position:y", suelo, 0.3).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tween.finished.connect(terminar_truco)
+
+func terminar_truco():
+	saltando = false
+
+func perder():
+	print("game over")
