@@ -3,9 +3,10 @@ extends CharacterBody2D
 #Variables Normales
 var velo = 200.0
 var saltando = false
-var gravedad = 980.0
 var buffer_tiempo_maximo = 0.18
 var buffer_contador = 0.0 
+var altura_suelo_referencia = 0.0
+var y_suelo_real = 0.0
 
 #Intento QTE
 var haciendo_qte = false
@@ -16,6 +17,10 @@ var trucos_sprites = []
 @onready var ui_qte_layer = $CanvasLayer
 @onready var contenedor_flechas = $CanvasLayer/QTEcontainer
 @onready var sprite_player = $Sprite2D
+@onready var barra_tiempo = $CanvasLayer/BarraTiempo
+@onready var feedback_label = $CanvasLayer/FeedbackLabel
+@onready var tex_normal = $Sprite2D.texture
+
 var tex_flecha_arriba = preload("res://Sprites/FUp.png")
 var tex_flecha_abajo = preload("res://Sprites/Fdown.png")
 var tex_flecha_izq = preload("res://Sprites/Fleft.png")
@@ -25,32 +30,32 @@ var tex_pose_1 = preload("res://Sprites/Pinguinotruco1.png")
 var tex_pose_2 = preload("res://Sprites/pinguinotruco2.png")
 
 func _ready() -> void:
+	await get_tree().process_frame
+	y_suelo_real = position.y
 	trucos_sprites = [tex_pose_1, tex_pose_2]
 	ui_qte_layer.visible = false
 
 func _physics_process(delta):
 	if haciendo_qte:
-		velocity = Vector2.ZERO # Se queda congelado en el aire
+		velocity = Vector2.ZERO
+		
 		move_and_slide()
 		return
 		
 	var tilt_amount = 15.0
 	var direction = Input.get_axis("left", "right")
 	$Sprite2D.rotation_degrees = lerp($Sprite2D.rotation_degrees, direction * tilt_amount, 0.1)
-	
 	if direction:
 		velocity.x = direction * velo 
 	else:
 		velocity.x = move_toward(velocity.x, 0, velo)
-	
 	move_and_slide()
+	
 	position.x = clamp(position.x, 20, 160)
 	if Input.is_action_just_pressed("jump"):
 		buffer_contador = buffer_tiempo_maximo
-
 	if buffer_contador > 0:
 		buffer_contador -= delta
-
 	if buffer_contador > 0 and not saltando:
 		salto()
 		buffer_contador = 0.0
@@ -69,6 +74,78 @@ func salto():
 
 func terminar_truco():
 	saltando = false
+	z_index = 0
+	sprite_player.texture = tex_normal
+
+func iniciar_qte():
+	if haciendo_qte: 
+		return
+	var tweens = get_tree().get_processed_tweens()
+	for t in tweens:
+		pass
+	haciendo_qte = true
+	saltando = true
+	z_index = 20
+	
+	altura_suelo_referencia = y_suelo_real
+	var tween = create_tween()
+	# Subimos más alto que un salto normal (-120) y más lento (0.5s)
+	tween.tween_property(self, "position:y", altura_suelo_referencia - 120, 0.5).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	secuencia_qte.clear()
+	paso_actual_qte = 0
+	var opciones = ["ui_up", "ui_down", "ui_left", "ui_right"]
+	for i in range(3):
+		secuencia_qte.append(opciones.pick_random())
+	
+	actualizar_ui_qte()
+	ui_qte_layer.visible = true
+
+func _input(event):
+	if not haciendo_qte: return
+	
+	if event is InputEventKey and event.pressed and not event.echo:
+		var accion_requerida = secuencia_qte[paso_actual_qte]
+		
+		if event.is_action_pressed(accion_requerida):
+			paso_actual_qte += 1
+			sprite_player.texture = trucos_sprites.pick_random()
+			
+			# Sumar puntos
+			var main = get_tree().current_scene
+			if main.has_method("sumar_puntos"): main.sumar_puntos(50)
+			
+			if paso_actual_qte >= secuencia_qte.size():
+				finalizar_qte()
+			else:
+				actualizar_ui_qte()
+				
+		elif event.is_action_pressed("ui_up") or event.is_action_pressed("ui_down") or event.is_action_pressed("ui_left") or event.is_action_pressed("ui_right"):
+			print("Fallo QTE")
+			finalizar_qte()
+
+func actualizar_ui_qte():
+	for child in contenedor_flechas.get_children():
+		child.texture = null
+	
+	for i in range(paso_actual_qte, secuencia_qte.size()):
+		var indice_nodo = i - paso_actual_qte
+		if indice_nodo < contenedor_flechas.get_child_count():
+			var texture_rect = contenedor_flechas.get_child(indice_nodo)
+			var accion = secuencia_qte[i]
+			match accion:
+				"ui_up": texture_rect.texture = tex_flecha_arriba
+				"ui_down": texture_rect.texture = tex_flecha_abajo
+				"ui_left": texture_rect.texture = tex_flecha_izq
+				"ui_right": texture_rect.texture = tex_flecha_der
+
+func finalizar_qte():
+	haciendo_qte = false
+	ui_qte_layer.visible = false
+	
+	var tween = create_tween()
+	tween.tween_property(self, "position:y", altura_suelo_referencia, 0.4).set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
+	
+	tween.finished.connect(terminar_truco)
 
 func perder():
 	print("game over")
