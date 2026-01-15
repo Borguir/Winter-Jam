@@ -1,6 +1,6 @@
 extends Area2D
 
-@export_enum("Obstaculo", "Rampa", "Moneda") var tipo_objeto: int = 0
+@export_enum("Obstaculo", "Rampa", "Pescao", "Obst_alto") var tipo_objeto: int = 0
 
 var velo_y = 100
 var velo_x = 10
@@ -8,50 +8,73 @@ var dificultad = 1.0
 var direccion_x = 0 
 var lado_izq = 80.0 
 var lado_der = 100.0
-var y_suelo_real = 0.0
-var choque = 0
+var multiplicador_tamano = 1.0
 
 func _ready() -> void:
-	scale = Vector2(0.1, 0.1)
-
-	if position.x < lado_izq:
-		direccion_x = -1
-	if position.x > lado_der:
-		direccion_x = 1
+	if position.x < lado_izq: direccion_x = -1
+	elif position.x > lado_der: direccion_x = 1
+	if tipo_objeto == 3:
+		multiplicador_tamano = 3.0
+	elif tipo_objeto == 2:
+		multiplicador_tamano = 1.5
+	else:
+		multiplicador_tamano = 1.5
+	actualizar_escala()
 
 func _process(delta: float) -> void:
 	var progreso = remap(position.y, 0, 320, 0.1, 1.2) 
-	progreso = clamp(progreso, 0.1, 1.5)
+	progreso = clamp(progreso, 0.1, 2.0)
+	
 	position.y += (velo_y * dificultad * progreso) * delta
 	position.x += (velo_x * direccion_x) * dificultad * progreso * delta
-	scale = Vector2(progreso, progreso)
+	var escala_final = progreso * multiplicador_tamano
+	scale = Vector2(escala_final, escala_final)
 
 	if position.y > 360:
 		queue_free()
 
 func _on_body_entered(body):
-	if body.is_in_group("player"): #RAMPA
-		if tipo_objeto == 1:
-			if body.saltando:
-				return
+	if body.is_in_group("Player"): 
+		
+		if tipo_objeto == 1: #Rampa
+			if body.saltando: return
 			if body.has_method("iniciar_qte"):
 				body.iniciar_qte()
 			
-		elif tipo_objeto == 2: #MONEDA
+		elif tipo_objeto == 2: #Pez
+			if body.haciendo_qte or not body.saltando: 
+				return #Pez
 			sumar_puntos_main(50)
 			queue_free() 
 			
-		elif tipo_objeto == 0: #Obsta Culo
+		elif tipo_objeto == 0: #Obstaculo
 			if not body.saltando:
-				var main_script = get_tree().current_scene
-				if main_script.has_method("choques"):
-					main_script.choques()
-				queue_free()
+				chocar()
+				
+		elif tipo_objeto == 3: #Arbol
+			if body.haciendo_qte: 
+				return
+			chocar()
+
+func actualizar_escala():
+	var progreso = remap(position.y, 0, 320, 0.1, 1.2) 
+	progreso = clamp(progreso, 0.1, 2.0)
+	var escala_final = progreso * multiplicador_tamano
+	scale = Vector2(escala_final, escala_final)
+
+func chocar():
+	var main_script = get_tree().current_scene
+	restar_puntos_main(50)
+	if main_script.has_method("choques"):
+		main_script.choques()
+	queue_free()
 
 func sumar_puntos_main(cantidad):
 	var main_script = get_tree().current_scene
 	if main_script.has_method("sumar_puntos"):
 		main_script.sumar_puntos(cantidad)
 
-func choques():
-	choque += 1
+func restar_puntos_main(cantidad):
+	var main_script = get_tree().current_scene
+	if main_script.has_method("restar_puntos"):
+		main_script.restar_puntos(cantidad)
