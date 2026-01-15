@@ -1,48 +1,109 @@
 extends Node2D
 
-@export var dificultad_global: float = 3.0
+enum EstadoClima {NORMAL, VIENTO}
+var estado_clima = EstadoClima.NORMAL
+
+var evento_activo = false 
+var tiempo_proximo_evento = 10.0 
+
+@export var dificultad_global: float = 3.2
 @export var incremento_dificultad: float = 0.4
 @onready var spawners = $Spawners.get_children()
 @onready var camino = $Camino
+
 var player_s = preload("res://Escenas/player.tscn")
+var aviso_scene = preload("res://Escenas/Aviso.tscn")
+var pez_scene = preload("res://Escenas/pez.tscn")
+
 var player = null
 var puntos = 0
-var vidas = 3
+var vidas = 4
 var dificultad_max = 20.0
 var dificultad_min = 1.0
-
+var contador_para_peces = 0
+var meta_para_peces = 2
 
 func _ready():
 	$SpawnTimer.start()
 	spawn_player()
-	player.position = Vector2(90.0, 250.0)
+	if player:
+		player.position = Vector2(90.0, 250.0)
+		await get_tree().process_frame
+		if player: player.y_suelo_real = player.position.y
+
+func _process(delta):
+	if vidas > 0 and not evento_activo:
+		tiempo_proximo_evento -= delta
+		
+		if tiempo_proximo_evento <= 0:
+			tiempo_proximo_evento = randf_range(15.0, 25.0)
+			decidir_evento()
+
+func decidir_evento():
+	if dificultad_global < 4.0: return
+
+	if dificultad_global > 5.0:
+		activar_viento()
 
 func _on_spawn_timer_timeout():
+	var intentos_spawn = [] 
 	for marker in spawners:
-		if marker.has_method("intentar_spawn"):
-			marker.intentar_spawn(dificultad_global)
+		if marker.has_method("generar_spawn_potencial"):
+			var objeto = marker.generar_spawn_potencial(dificultad_global)
+			intentos_spawn.append({
+				"nodo": objeto, 
+				"marker": marker
+			})
+
+	var indices_peligrosos = []
+	for i in range(intentos_spawn.size()):
+		var obj = intentos_spawn[i]["nodo"]
+		if obj != null and "tipo_objeto" in obj:
+			if obj.tipo_objeto == 0 or obj.tipo_objeto == 3:
+				indices_peligrosos.append(i)
+
+	if indices_peligrosos.size() >= 3:
+		var indice_borrar = indices_peligrosos.pick_random()
+		if intentos_spawn[indice_borrar]["nodo"]:
+			intentos_spawn[indice_borrar]["nodo"].queue_free()
+			intentos_spawn[indice_borrar]["nodo"] = null
+
+	for item in intentos_spawn:
+		var obj = item["nodo"]
+		var marker = item["marker"]
+		
+		if obj != null:
+			obj.global_position = marker.global_position
+			add_child(obj)
 
 func _on_dificult_timer_timeout() -> void:
 	dificultad_global += incremento_dificultad
 	dificultad_global = min(dificultad_global, dificultad_max)
-	print("Dificultad subió a: ", dificultad_global)
-	camino.autoscroll.y = 30 * dificultad_global 
-	if $SpawnTimer.wait_time > 0.5:
+	print("Dificultad: ", dificultad_global)
+	
+	if camino:
+		camino.autoscroll.y = 30 * dificultad_global 
+	if $SpawnTimer.wait_time > 0.6:
 		$SpawnTimer.wait_time -= 0.05
 
 func spawn_player():
 	var instanciar = player_s.instantiate()
 	add_child(instanciar)
 	player = instanciar
+	player.add_to_group("Player")
 
 func sumar_puntos(amount: int):
 	puntos += amount
 	print("puntos: " + str(puntos))
 
+func restar_puntos(amount: int):
+	puntos -= amount
+	if puntos < 0: puntos = 0
+
 func choques():
 	vidas -= 1
 	if vidas <= 0:
-		player.perder()
+		game_over()
 	else:
 		bajar_dificultad()
 
@@ -50,14 +111,43 @@ func bajar_dificultad():
 	dificultad_global = dificultad_global / 2.0
 	dificultad_global = max(dificultad_min, dificultad_global)
 	
+	$SpawnTimer.wait_time = min(1.5, $SpawnTimer.wait_time + 0.3)
+	
 	if camino:
 		camino.autoscroll.y = 30 * dificultad_global
+	
 	if player:
-		player.modulate = Color(1, 0, 0)
-		await get_tree().create_timer(0.2).timeout
-		if player:
-			player.modulate = Color(1, 1, 1)
+		var tween = create_tween()
+		tween.tween_property(player, "modulate:a", 0.5, 0.1)
+		tween.tween_property(player, "modulate:a", 1.0, 0.1)
+		tween.set_loops(3)
+
+func activar_viento():
+	if evento_activo: return
+	evento_activo = true
+	var dir = [-1, 1].pick_random()
+	print("Viento: ", dir)
+	
+	if player and player.has_node("ParticulasViento"):
+		player.get_node("ParticulasViento").direction.x = dir
+		player.get_node("ParticulasViento").emitting = true
+	
+	var tween = create_tween()
+	tween.tween_property(player, "fuerza_viento", dir * 50.0, 2.0)
+	await get_tree().create_timer(8.0).timeout
+	
+	if player:
+		var tween_off = create_tween()
+		tween_off.tween_property(player, "fuerza_viento", 0.0, 2.0)
+		tween_off.finished.connect(func(): 
+			evento_activo = false
+			if player and player.has_node("ParticulasViento"):
+				player.get_node("ParticulasViento").emitting = false
+		)
+	else:
+		evento_activo = false
 
 func game_over():
 	if player:
-		player.perder()
+		if player.has_method("descansar"): player.descansar()
+		else: player.perder()
