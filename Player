@@ -1,19 +1,23 @@
 extends CharacterBody2D
 
-#Variables Normales
 var velo = 200.0
 var saltando = false
 var buffer_tiempo_maximo = 0.18
 var buffer_contador = 0.0 
-var altura_suelo_referencia = 0.0
 var y_suelo_real = 0.0
+var esperando_final = false
+var fuerza_viento = 0.0
+var deslizando = true
 
-#Intento QTE
 var haciendo_qte = false
-var secuencia_qte = [] #["arriba", "izquierda", "abajo"]
+var secuencia_qte = [] 
 var paso_actual_qte = 0
 var trucos_sprites = []
 
+var tiempo_limite_qte: float = 1.5
+var tiempo_actual = 0.0
+
+@onready var part_desliz = $Desliz
 @onready var ui_qte_layer = $CanvasLayer
 @onready var contenedor_flechas = $CanvasLayer/QTEcontainer
 @onready var sprite_player = $Sprite2D
@@ -28,30 +32,52 @@ var tex_flecha_der = preload("res://Sprites/Fright.png")
 
 var tex_pose_1 = preload("res://Sprites/Pinguinotruco1.png")
 var tex_pose_2 = preload("res://Sprites/pinguinotruco2.png")
+var tex_exito = preload("res://Sprites/PinguinoVictoria.png")
+var tex_fallo = preload("res://Sprites/PinguinoDerrota.png")
 
 func _ready() -> void:
+	# Esperar un frame es vital para obtener la posición real dada por el Main
 	await get_tree().process_frame
 	y_suelo_real = position.y
+	
 	trucos_sprites = [tex_pose_1, tex_pose_2]
 	ui_qte_layer.visible = false
+	feedback_label.visible = false
 
 func _physics_process(delta):
+	deslizar()
 	if haciendo_qte:
 		velocity = Vector2.ZERO
+		if esperando_final:
+			return
+		tiempo_actual -= delta
+		barra_tiempo.value = tiempo_actual
 		
+		if tiempo_actual < 0.5:
+			barra_tiempo.modulate = Color(1, 0, 0) # Rojo
+		else:
+			barra_tiempo.modulate = Color(0, 1, 0) # Verde
+			
+		if tiempo_actual <= 0:
+			fallar_qte("¡Tiempo!")
+			
 		move_and_slide()
 		return
 		
 	var tilt_amount = 15.0
 	var direction = Input.get_axis("left", "right")
 	$Sprite2D.rotation_degrees = lerp($Sprite2D.rotation_degrees, direction * tilt_amount, 0.1)
+	
+	var velocidad_deseada = 0.0
 	if direction:
-		velocity.x = direction * velo 
+		velocidad_deseada = (direction * velo) + fuerza_viento
 	else:
-		velocity.x = move_toward(velocity.x, 0, velo)
+		velocidad_deseada = fuerza_viento
+	velocity.x = move_toward(velocity.x, velocidad_deseada, velo * delta * 5.0)
 	move_and_slide()
 	
 	position.x = clamp(position.x, 20, 160)
+	
 	if Input.is_action_just_pressed("jump"):
 		buffer_contador = buffer_tiempo_maximo
 	if buffer_contador > 0:
@@ -61,15 +87,14 @@ func _physics_process(delta):
 		buffer_contador = 0.0
 
 func salto():
-	if saltando:
-		return
-	
+	if saltando: return
 	saltando = true
-	var suelo = position.y 
-	var tween = create_tween()
+	z_index = 10 # Dibujarse encima de obstáculos
 	
-	tween.tween_property(self, "position:y", suelo - 70, 0.4).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tween.tween_property(self, "position:y", suelo, 0.3).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	var tween = create_tween()
+	# Usamos y_suelo_real para saltos consistentes
+	tween.tween_property(self, "position:y", y_suelo_real - 70, 0.4).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(self, "position:y", y_suelo_real, 0.3).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	tween.finished.connect(terminar_truco)
 
 func terminar_truco():
@@ -78,19 +103,19 @@ func terminar_truco():
 	sprite_player.texture = tex_normal
 
 func iniciar_qte():
-	if haciendo_qte: 
-		return
-	var tweens = get_tree().get_processed_tweens()
-	for t in tweens:
-		pass
+	if haciendo_qte: return
 	haciendo_qte = true
 	saltando = true
 	z_index = 20
 	
-	altura_suelo_referencia = y_suelo_real
+	tiempo_actual = tiempo_limite_qte
+	barra_tiempo.max_value = tiempo_limite_qte
+	barra_tiempo.value = tiempo_limite_qte
+	
 	var tween = create_tween()
-	# Subimos más alto que un salto normal (-120) y más lento (0.5s)
-	tween.tween_property(self, "position:y", altura_suelo_referencia - 120, 0.5).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	position.y = y_suelo_real 
+	tween.tween_property(self, "position:y", y_suelo_real - 120, 0.5).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	
 	secuencia_qte.clear()
 	paso_actual_qte = 0
 	var opciones = ["ui_up", "ui_down", "ui_left", "ui_right"]
@@ -101,7 +126,8 @@ func iniciar_qte():
 	ui_qte_layer.visible = true
 
 func _input(event):
-	if not haciendo_qte: return
+	if not haciendo_qte or esperando_final:
+		return
 	
 	if event is InputEventKey and event.pressed and not event.echo:
 		var accion_requerida = secuencia_qte[paso_actual_qte]
@@ -109,19 +135,18 @@ func _input(event):
 		if event.is_action_pressed(accion_requerida):
 			paso_actual_qte += 1
 			sprite_player.texture = trucos_sprites.pick_random()
+			mostrar_feedback("¡BIEN!", Color(0, 1, 0))
 			
-			# Sumar puntos
 			var main = get_tree().current_scene
 			if main.has_method("sumar_puntos"): main.sumar_puntos(50)
 			
 			if paso_actual_qte >= secuencia_qte.size():
-				finalizar_qte()
+				finalizar_qte_exito()
 			else:
 				actualizar_ui_qte()
 				
 		elif event.is_action_pressed("ui_up") or event.is_action_pressed("ui_down") or event.is_action_pressed("ui_left") or event.is_action_pressed("ui_right"):
-			print("Fallo QTE")
-			finalizar_qte()
+			fallar_qte("¡UPS!")
 
 func actualizar_ui_qte():
 	for child in contenedor_flechas.get_children():
@@ -138,14 +163,67 @@ func actualizar_ui_qte():
 				"ui_left": texture_rect.texture = tex_flecha_izq
 				"ui_right": texture_rect.texture = tex_flecha_der
 
-func finalizar_qte():
+func acierto_qte():
+	paso_actual_qte += 1
+	sprite_player.texture = trucos_sprites.pick_random()
+	
+	mostrar_feedback("¡BIEN!", Color(0, 1, 0)) 
+	
+	var main = get_tree().current_scene
+	if main.has_method("sumar_puntos"): main.sumar_puntos(50)
+	
+	if paso_actual_qte >= secuencia_qte.size():
+		finalizar_qte_exito()
+	else:
+		actualizar_ui_qte()
+
+func fallar_qte(razon: String):
+	esperando_final = true
+	sprite_player.texture = tex_fallo
+	mostrar_feedback(razon, Color(1, 0, 0))
+	var main = get_tree().current_scene
+	if main.has_method("restar_puntos"): main.restar_puntos(150)
+	
+	await get_tree().create_timer(0.5).timeout
+	
+	finalizar_qte_general()
+
+func finalizar_qte_exito():
+	esperando_final = true
+	sprite_player.texture = tex_exito
+	mostrar_feedback("¡EXCELENTE!", Color(1, 1, 0))
+	
+	await get_tree().create_timer(0.8).timeout
+	
+	finalizar_qte_general()
+
+func finalizar_qte_general():
 	haciendo_qte = false
+	esperando_final = false
 	ui_qte_layer.visible = false
 	
-	var tween = create_tween()
-	tween.tween_property(self, "position:y", altura_suelo_referencia, 0.4).set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
+	feedback_label.visible = false 
 	
+	var tween = create_tween()
+	tween.tween_property(self, "position:y", y_suelo_real, 0.4).set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
 	tween.finished.connect(terminar_truco)
+
+func mostrar_feedback(texto: String, color: Color):
+	feedback_label.text = texto
+	feedback_label.modulate = color
+	feedback_label.visible = true
+	feedback_label.scale = Vector2(1.5, 1.5) 
+	
+	var tween = create_tween()
+	tween.tween_property(feedback_label, "scale", Vector2(1.0, 1.0), 0.2).set_trans(Tween.TRANS_BOUNCE)
 
 func perder():
 	print("game over")
+	#set_physics_process(false)
+	modulate = Color(0.7, 0.0, 0.1)
+
+func deslizar():
+	if not saltando and not haciendo_qte:
+		part_desliz.emitting = true
+	else:
+		part_desliz.emitting = false
