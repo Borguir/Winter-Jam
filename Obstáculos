@@ -8,15 +8,25 @@ var dificultad = 1.0
 var direccion_x = 0 
 var lado_izq = 80.0 
 var lado_der = 100.0
+var es_alto = false
 var multiplicador_tamano = 1.0
+
+@onready var sprite = $Sprite2D
+@onready var colision = $CollisionShape2D
 
 func _ready() -> void:
 	if position.x < lado_izq: direccion_x = -1
 	elif position.x > lado_der: direccion_x = 1
-	if tipo_objeto == 3:
+	
+	if tipo_objeto == 3: # ARBOL
 		multiplicador_tamano = 3.0
-	elif tipo_objeto == 2:
+		
+	elif tipo_objeto == 2: # PEZ
 		multiplicador_tamano = 1.5
+	
+		if es_alto:
+			sprite.position.y = -60
+			colision.position.y = -60
 	else:
 		multiplicador_tamano = 1.5
 	actualizar_escala()
@@ -24,37 +34,14 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	var progreso = remap(position.y, 0, 320, 0.1, 1.2) 
 	progreso = clamp(progreso, 0.1, 2.0)
-	
 	position.y += (velo_y * dificultad * progreso) * delta
 	position.x += (velo_x * direccion_x) * dificultad * progreso * delta
-	var escala_final = progreso * multiplicador_tamano
-	scale = Vector2(escala_final, escala_final)
-
+	actualizar_escala()
 	if position.y > 360:
 		queue_free()
-
-func _on_body_entered(body):
-	if body.is_in_group("Player"): 
-		
-		if tipo_objeto == 1: #Rampa
-			if body.saltando: return
-			if body.has_method("iniciar_qte"):
-				body.iniciar_qte()
-			
-		elif tipo_objeto == 2: #Pez
-			if body.haciendo_qte or not body.saltando: 
-				return #Pez
-			sumar_puntos_main(50)
-			queue_free() 
-			
-		elif tipo_objeto == 0: #Obstaculo
-			if not body.saltando:
-				chocar()
-				
-		elif tipo_objeto == 3: #Arbol
-			if body.haciendo_qte: 
-				return
-			chocar()
+	
+	if position.y > 260.0:
+		colision.disabled = true 
 
 func actualizar_escala():
 	var progreso = remap(position.y, 0, 320, 0.1, 1.2) 
@@ -62,19 +49,40 @@ func actualizar_escala():
 	var escala_final = progreso * multiplicador_tamano
 	scale = Vector2(escala_final, escala_final)
 
-func chocar():
-	var main_script = get_tree().current_scene
-	restar_puntos_main(50)
-	if main_script.has_method("choques"):
-		main_script.choques()
+func _on_body_entered(body):
+	if body.is_in_group("Player"): 
+		if tipo_objeto == 2:
+			if body.haciendo_qte:
+				return 
+			if es_alto:
+				if not body.saltando:
+					return
+			else:
+				if body.saltando:
+					return
+			recoger_pez() 
+			
+		elif tipo_objeto == 1:
+			if body.saltando: return
+			if body.has_method("iniciar_qte"):
+				body.iniciar_qte()
+				
+		elif tipo_objeto == 0: 
+			if not body.saltando:
+				chocar_jugador()
+				
+		elif tipo_objeto == 3:
+			if body.haciendo_qte: return
+			chocar_jugador()
+
+func recoger_pez():
+	var main = get_tree().current_scene
+	if main.has_method("sumar_puntos"): 
+		main.sumar_puntos(50)
 	queue_free()
 
-func sumar_puntos_main(cantidad):
-	var main_script = get_tree().current_scene
-	if main_script.has_method("sumar_puntos"):
-		main_script.sumar_puntos(cantidad)
-
-func restar_puntos_main(cantidad):
-	var main_script = get_tree().current_scene
-	if main_script.has_method("restar_puntos"):
-		main_script.restar_puntos(cantidad)
+func chocar_jugador():
+	var main = get_tree().current_scene
+	if main.has_method("choques"): main.choques()
+	if main.has_method("restar_puntos"): main.restar_puntos(50)
+	queue_free()
