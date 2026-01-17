@@ -14,7 +14,7 @@ var secuencia_qte = []
 var paso_actual_qte = 0
 var trucos_sprites = []
 
-var tiempo_limite_qte: float = 1.5
+var tiempo_limite_qte: float = 1.75
 var tiempo_actual = 0.0
 
 @onready var part_desliz = $Desliz
