@@ -2,7 +2,6 @@ extends Node2D
 
 enum EstadoClima {NORMAL, VIENTO}
 var estado_clima = EstadoClima.NORMAL
-
 var evento_activo = false 
 var tiempo_proximo_evento = 10.0 
 
@@ -10,6 +9,7 @@ var tiempo_proximo_evento = 10.0
 @export var incremento_dificultad: float = 0.4
 @onready var spawners = $Spawners.get_children()
 @onready var camino = $Camino
+@onready var barra_progreso = $CanvasLayer/ProgressBar
 
 var player_s = preload("res://Escenas/player.tscn")
 var aviso_scene = preload("res://Escenas/Aviso.tscn")
@@ -22,6 +22,9 @@ var dificultad_max = 20.0
 var dificultad_min = 1.0
 var contador_para_peces = 0
 var meta_para_peces = 2
+var distancia_meta = 3000.0
+var distancia_recorrida = 0.0
+var juego_terminado = false
 
 func _ready():
 	$SpawnTimer.start()
@@ -34,27 +37,30 @@ func _ready():
 func _process(delta):
 	if vidas > 0 and not evento_activo:
 		tiempo_proximo_evento -= delta
-		
 		if tiempo_proximo_evento <= 0:
 			tiempo_proximo_evento = randf_range(15.0, 25.0)
 			decidir_evento()
+		var avance = dificultad_global * 5.0 * delta
+		distancia_recorrida += avance
+		var porcentaje = (distancia_recorrida / distancia_meta) * 100
+		barra_progreso.value = porcentaje
+		if distancia_recorrida >= distancia_meta:
+			llegar_iglu()
 
 func decidir_evento():
 	if dificultad_global < 4.0: return
-
 	if dificultad_global > 5.0:
 		activar_viento()
 
 func _on_spawn_timer_timeout():
+	spawn_normal()
+
+func spawn_normal():
 	var intentos_spawn = [] 
 	for marker in spawners:
 		if marker.has_method("generar_spawn_potencial"):
 			var objeto = marker.generar_spawn_potencial(dificultad_global)
-			intentos_spawn.append({
-				"nodo": objeto, 
-				"marker": marker
-			})
-
+			intentos_spawn.append({ "nodo": objeto, "marker": marker })
 	var indices_peligrosos = []
 	for i in range(intentos_spawn.size()):
 		var obj = intentos_spawn[i]["nodo"]
@@ -68,13 +74,82 @@ func _on_spawn_timer_timeout():
 			intentos_spawn[indice_borrar]["nodo"].queue_free()
 			intentos_spawn[indice_borrar]["nodo"] = null
 
+	contador_para_peces += 1
+	var pez_extra_data = null 
+
+	if contador_para_peces >= meta_para_peces:
+		contador_para_peces = 0
+		meta_para_peces = randi_range(2, 4) 
+		var idx_azar = randi() % intentos_spawn.size()
+		var contenido_carril = intentos_spawn[idx_azar]["nodo"]
+		var marker_elegido = intentos_spawn[idx_azar]["marker"]
+		var poner_pez = false
+		var debe_ser_alto = false
+		
+		if contenido_carril == null:
+			poner_pez = true
+			debe_ser_alto = randi() % 2 == 0 
+		elif "tipo_objeto" in contenido_carril:
+			if contenido_carril.tipo_objeto == 0:
+				poner_pez = true
+				debe_ser_alto = true
+			elif contenido_carril.tipo_objeto == 3:
+				poner_pez = false
+		if poner_pez:
+			pez_extra_data = {
+				"marker": marker_elegido, 
+				"es_alto": debe_ser_alto
+			}
 	for item in intentos_spawn:
 		var obj = item["nodo"]
 		var marker = item["marker"]
-		
 		if obj != null:
 			obj.global_position = marker.global_position
 			add_child(obj)
+	if pez_extra_data != null:
+		spawnear_pez_extra(pez_extra_data["marker"], dificultad_global, pez_extra_data["es_alto"])
+
+func spawn_diagonal():
+	var direccion = randi() % 2 
+	var offset_y = -10.0
+	if spawners.is_empty() or spawners[0].escenas.is_empty(): 
+		return
+	
+	var indice_azar = randi() % spawners[0].escenas.size()
+	var escena_base = spawners[0].escenas[indice_azar]
+	var temp = escena_base.instantiate()
+	var es_arbol = false
+	if "tipo_objeto" in temp and temp.tipo_objeto == 3:
+		es_arbol = true
+	temp.queue_free()
+	var carril_hueco = -1
+	if es_arbol:
+		carril_hueco = randi() % spawners.size()
+	
+	for i in range(spawners.size()):
+		if es_arbol and i == carril_hueco:
+			continue 
+		var marker = spawners[i]
+		var index_ajustado = i
+		if direccion == 1:
+			index_ajustado = (spawners.size() - 1) - i
+		var obs = escena_base.instantiate()
+		obs.global_position = marker.global_position
+		obs.position.y += (index_ajustado * offset_y)
+		if "dificultad" in obs: obs.dificultad = dificultad_global
+		add_child(obs)
+		
+		if obs.tipo_objeto == 1:
+			if randi() % 100 < 30:
+				spawnear_pez_extra(marker, dificultad_global, true)
+
+func spawnear_pez_extra(marker, dificultad, es_alto):
+	var pez = pez_scene.instantiate()
+	pez.global_position = marker.global_position
+	pez.dificultad = dificultad
+	pez.tipo_objeto = 2
+	pez.es_alto = es_alto
+	add_child(pez)
 
 func _on_dificult_timer_timeout() -> void:
 	dificultad_global += incremento_dificultad
@@ -151,3 +226,10 @@ func game_over():
 	if player:
 		if player.has_method("descansar"): player.descansar()
 		else: player.perder()
+
+func llegar_iglu():
+	juego_terminado = true
+	print("¡Hogar dulce hogar!")
+	$SpawnTimer.stop()
+	get_tree().call_group("obstaculos", "queue_free")
+	#Poner lo demas
