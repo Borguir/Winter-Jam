@@ -8,28 +8,28 @@ var puede_spawnear: bool = true
 func generar_spawn_potencial(dificultad_actual: float) -> Node2D:
 	if not puede_spawnear:
 		return null
+		
 	if randi() % 100 < probabilidad_vacio:
 		return null
 
 	var objeto_elegido = elegir_objeto_ponderado()
+	
 	if objeto_elegido:
 		var instancia = objeto_elegido.instantiate()
+		# Pasamos la dificultad pero devolvemos la instancia sin agregarla (add_child)
 		if "dificultad" in instancia:
 			instancia.dificultad = dificultad_actual
-		return instancia 
+		return instancia
 		
 	return null
 
 func elegir_objeto_ponderado() -> PackedScene:
 	var suma = 0
-	for p in pesos:
-		suma += p
-	if suma == 0:
-		return null
+	for p in pesos: suma += p
+	if suma == 0: return null
 	var r = randi() % suma
 	var acum = 0
 	for i in range(pesos.size()):
 		acum += pesos[i]
-		if r < acum:
-			return escenas[i]
+		if r < acum: return escenas[i]
 	return null
